@@ -17,9 +17,12 @@ SLPlayItf pcmPlayerPlay;
 SLAndroidSimpleBufferQueueItf pcmBufferQueue;
 //读取PCM文件
 FILE *pcmFile;
+//设置缓存
 void *buffer;
+//设置输出缓存
 uint8_t *out_buffer;
 
+//获取PCM数据
 int getPCMData(void **pcm) {
     int size = 0;
     while (!feof(pcmFile)) {
@@ -36,7 +39,8 @@ int getPCMData(void **pcm) {
     return size;
 }
 
-void pcmBufferCallback(SLAndroidSimpleBufferQueueItf bf, void *const context) {
+//PCM缓存队列回调函数
+void pcmBufferCallback(SLAndroidSimpleBufferQueueItf simpleBufferQueue, void *const context) {
     int size = getPCMData(&buffer);
     if (buffer != NULL) {
         (*pcmBufferQueue)->Enqueue(pcmBufferQueue, buffer, size);
@@ -50,33 +54,34 @@ Java_com_rainbow_androidopenslaudio_MainActivity_playAudioWithPCM(JNIEnv *env, j
 
     const char *url = env->GetStringUTFChars(url_, 0);
     LOGD("#请求音频路径:%s", url);
-    pcmFile = fopen(url, "r");
+    pcmFile = fopen(url, "r+");
 
     if (pcmFile == NULL) {
         LOGE("#音频路径%s不存在文件", url);
         return;
     }
     //初始化音频缓存
-    out_buffer = (uint8_t *) malloc(16000 * 2 * 2);
-    //创建SL引擎
+    out_buffer = (uint8_t *) malloc(44100 * 2 * 2);
+    //创建SL三部曲
     slCreateEngine(&engineObject, 0, 0, 0, 0, 0);
     (*engineObject)->Realize(engineObject, SL_BOOLEAN_FALSE);
     (*engineObject)->GetInterface(engineObject, SL_IID_ENGINE, &engineEngine);
-
+    //设置混音器
     const SLInterfaceID mids[1] = {SL_IID_ENVIRONMENTALREVERB};
-    const SLboolean mreq[1] = {SL_BOOLEAN_FALSE};
+    const SLboolean mrep[1] = {SL_BOOLEAN_FALSE};
 
-    (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 1, mids, mreq);
+    (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 1, mids, mrep);
     (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
     (*outputMixObject)->GetInterface(outputMixObject, SL_IID_ENVIRONMENTALREVERB,
                                      &outputMixEnvironmentalReverb);
 
+
     (*outputMixEnvironmentalReverb)->SetEnvironmentalReverbProperties(outputMixEnvironmentalReverb,
                                                                       &slEnvironmentalReverbSettings);
+    SLDataLocator_AndroidSimpleBufferQueue android_queue = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE,
+                                                            2};
 
-    SLDataLocator_AndroidBufferQueue android_queue = {SL_DATALOCATOR_ANDROIDBUFFERQUEUE, 2};
-
-    SLDataFormat_PCM pcm = {
+    SLDataFormat_PCM format_pcm = {
             SL_DATAFORMAT_PCM,
             2,
             SL_SAMPLINGRATE_44_1,
@@ -89,7 +94,7 @@ Java_com_rainbow_androidopenslaudio_MainActivity_playAudioWithPCM(JNIEnv *env, j
     };
 
     SLDataLocator_OutputMix outputMix = {SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
-    SLDataSource slDataSource = {&android_queue, &pcm};
+    SLDataSource slDataSource = {&android_queue, &format_pcm};
     SLDataSink audioSink = {&outputMix, NULL};
 
     const SLInterfaceID ids[1] = {SL_IID_BUFFERQUEUE};
@@ -99,10 +104,10 @@ Java_com_rainbow_androidopenslaudio_MainActivity_playAudioWithPCM(JNIEnv *env, j
     (*engineEngine)->CreateAudioPlayer(
             engineEngine, &pcmPlayerObject, &slDataSource, &audioSink, 1, ids, req
     );
-
     (*pcmPlayerObject)->Realize(pcmPlayerObject, SL_BOOLEAN_FALSE);
     (*pcmPlayerObject)->GetInterface(pcmPlayerObject, SL_IID_PLAY, &pcmPlayerPlay);
 
+    //设置缓冲队列和回调函数
     (*pcmPlayerObject)->GetInterface(pcmPlayerObject, SL_IID_BUFFERQUEUE, &pcmBufferQueue);
     //注册回调函数
     (*pcmBufferQueue)->RegisterCallback(pcmBufferQueue, &pcmBufferCallback, NULL);
